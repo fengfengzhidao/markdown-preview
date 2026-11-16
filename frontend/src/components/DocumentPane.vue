@@ -1,0 +1,151 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { basicSetup } from 'codemirror'
+import { Compartment, EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
+import { markdown } from '@codemirror/lang-markdown'
+import { languages } from '@codemirror/language-data'
+import { AppService } from '../../bindings/markdownlite'
+import { renderMarkdown } from '../markdown'
+import type { DocumentTab } from '../types'
+
+const props = defineProps<{ document: DocumentTab; locked: boolean; active: boolean }>()
+const emit = defineEmits<{ change: [id: string, content: string]; error: [message: string] }>()
+const editorHost = ref<HTMLElement>()
+const preview = ref<HTMLElement>()
+const container = ref<HTMLElement>()
+const ratio = ref(50)
+const resizing = ref(false)
+const renderedContent = ref(props.document.content)
+const rendered = computed(() => renderMarkdown(renderedContent.value, props.document.id))
+const lockConfiguration = new Compartment()
+let editor: EditorView | undefined
+let renderTimer: ReturnType<typeof setTimeout> | undefined
+
+function lockExtensions() {
+  return [
+    EditorState.readOnly.of(props.locked),
+    EditorView.editable.of(!props.locked),
+    EditorView.contentAttributes.of({ 'aria-readonly': String(props.locked) }),
+  ]
+}
+
+function createState() {
+  const lineEnding = props.document.content.match(/\r\n|\r|\n/)?.[0] ?? '\n'
+  return EditorState.create({
+    doc: props.document.content,
+    extensions: [
+      basicSetup,
+      markdown({ codeLanguages: languages }),
+      EditorView.lineWrapping,
+      EditorState.lineSeparator.of(lineEnding),
+      lockConfiguration.of(lockExtensions()),
+      EditorView.contentAttributes.of({ 'aria-label': 'Markdown 原文', tabindex: '0', spellcheck: 'false' }),
+      EditorView.theme({
+        '&': { height: '100%', backgroundColor: 'transparent', fontSize: '14px' },
+        '&.cm-focused': { outline: 'none' },
+        '.cm-scroller': { fontFamily: '"Cascadia Code", "Consolas", "Microsoft YaHei UI", monospace', lineHeight: '1.9', overflow: 'auto' },
+        '.cm-content': { padding: '30px 24px 80px 12px', caretColor: '#3d7869' },
+        '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: '#a5aab0', padding: '0 4px 0 12px' },
+        '.cm-activeLineGutter, .cm-activeLine': { backgroundColor: '#edf1ef' },
+        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: '#dcebe5' },
+      }),
+      EditorView.updateListener.of(update => {
+        if (update.docChanged) emit('change', props.document.id, update.state.sliceDoc())
+      }),
+    ],
+  })
+}
+
+watch(() => props.locked, () => {
+  editor?.dispatch({ effects: lockConfiguration.reconfigure(lockExtensions()) })
+})
+
+watch(() => props.document.content, content => {
+  clearTimeout(renderTimer)
+  renderTimer = setTimeout(() => { renderedContent.value = content }, 90)
+})
+
+watch(() => props.document.generation, () => {
+  editor?.setState(createState())
+  renderedContent.value = props.document.content
+})
+
+watch(() => [props.active, props.document.mode], async () => {
+  await nextTick()
+  editor?.requestMeasure()
+})
+
+function startResize(event: PointerEvent) {
+  if (event.button !== 0) return
+  resizing.value = true
+  const handle = event.currentTarget as HTMLElement
+  handle.setPointerCapture(event.pointerId)
+}
+
+function resize(event: PointerEvent) {
+  if (!resizing.value || !container.value) return
+  const rect = container.value.getBoundingClientRect()
+  ratio.value = Math.min(75, Math.max(25, ((event.clientX - rect.left) / rect.width) * 100))
+  editor?.requestMeasure()
+}
+
+function resizeByKey(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  ratio.value = Math.min(75, Math.max(25, ratio.value + (event.key === 'ArrowLeft' ? -2 : 2)))
+  editor?.requestMeasure()
+}
+
+async function openLink(event: MouseEvent) {
+  const anchor = (event.target as HTMLElement).closest('a')
+  if (!anchor) return
+  event.preventDefault()
+  const href = anchor.getAttribute('href') ?? ''
+  if (href.startsWith('#')) {
+    let id = href.slice(1)
+    try { id = decodeURIComponent(id) } catch { /* Use the literal anchor. */ }
+    const heading = Array.from(preview.value?.querySelectorAll('[id]') ?? []).find(element => element.id === id)
+    heading?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  try {
+    await AppService.OpenLink(href)
+  } catch (error) {
+    emit('error', String(error))
+  }
+}
+
+onMounted(() => { editor = new EditorView({ state: createState(), parent: editorHost.value }) })
+onBeforeUnmount(() => { clearTimeout(renderTimer); editor?.destroy() })
+</script>
+
+<template>
+  <section ref="container" class="document-pane" :class="{ resizing }" :aria-label="document.name">
+    <div
+      v-show="document.mode !== 'preview'"
+      ref="editorHost"
+      class="source-pane"
+      :style="{ width: document.mode === 'split' ? `${ratio}%` : '100%' }"
+    />
+    <div
+      v-show="document.mode === 'split'"
+      class="resize-handle"
+      role="separator"
+      tabindex="0"
+      aria-label="调整原文与预览宽度"
+      aria-orientation="vertical"
+      :aria-valuenow="Math.round(ratio)"
+      :aria-valuemin="25"
+      :aria-valuemax="75"
+      @pointerdown="startResize"
+      @pointermove="resize"
+      @pointerup="resizing = false"
+      @lostpointercapture="resizing = false"
+      @keydown="resizeByKey"
+    />
+    <div v-show="document.mode !== 'source'" ref="preview" class="preview-pane" @click="openLink">
+      <article class="markdown-body" v-html="rendered" />
+    </div>
+  </section>
+</template>

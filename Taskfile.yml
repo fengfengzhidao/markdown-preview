@@ -1,0 +1,49 @@
+version: '3'
+
+vars:
+  APP_NAME: MarkdownLite
+  VITE_PORT: '{{.WAILS_VITE_PORT | default 9256}}'
+  BUILD_FLAGS: '{{if eq .DEV "true"}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{end}}'
+
+tasks:
+  icons:
+    summary: Generate the Moye application icon
+    cmds:
+      - go run build/generate-icon.go
+      - wails3 generate icons -input build/appicon.png -windowsfilename build/windows/icon.ico -macfilename=
+
+  build:
+    summary: Build the Windows desktop application
+    deps: [frontend]
+    cmds:
+      - wails3 generate syso -arch amd64 -icon build/windows/icon.ico -manifest build/windows/wails.exe.manifest -info build/windows/info.json -out wails_windows_amd64.syso
+      - defer: powershell -NoProfile -Command "Remove-Item -LiteralPath wails_windows_amd64.syso -ErrorAction SilentlyContinue"
+      - go build {{.BUILD_FLAGS}} -o bin/{{.APP_NAME}}.exe .
+
+  dependencies:
+    dir: frontend
+    sources: [package.json, package-lock.json]
+    generates: [node_modules/.package-lock.json]
+    cmds: [npm ci]
+
+  bindings:
+    cmds:
+      - go mod tidy
+      - wails3 generate bindings -clean -ts -i
+
+  frontend:
+    deps: [dependencies, bindings]
+    dir: frontend
+    cmds: [npm run build]
+
+  dev:
+    cmds:
+      - wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  dev:frontend:
+    dir: frontend
+    cmds:
+      - npm run dev -- --port {{.VITE_PORT}} --strictPort
+
+  run:
+    cmds: [bin/MarkdownLite.exe]

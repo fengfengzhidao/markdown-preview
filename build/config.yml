@@ -1,0 +1,26 @@
+version: '3'
+
+info:
+  companyName: fengfengzhidao
+  productName: 墨页
+  productIdentifier: com.fengfengzhidao.markdownlite
+  description: 简约的本地 Markdown 阅读器
+  copyright: © 2026 fengfengzhidao
+  version: 0.1.0
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 500
+  ignore:
+    dir: [.git, node_modules, frontend, bin, .task]
+    file: ['*_test.go', '*.syso']
+    watched_extension: ['*.go']
+    git_ignore: true
+  executes:
+    - cmd: wails3 build DEV=true
+      type: blocking
+    - cmd: wails3 task dev:frontend
+      type: background
+    - cmd: wails3 task run
+      type: primary
