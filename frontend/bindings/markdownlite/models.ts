@@ -14,6 +14,17 @@ export interface OpenResult {
     "errors": string[] | null;
 }
 
+export interface RenameResult {
+    "id": string;
+    "path": string;
+    "name": string;
+}
+
+export interface SaveNewResult {
+    "document": Document | null;
+    "conflict": boolean;
+}
+
 export interface SaveResult {
     "revision": string;
     "conflict": boolean;

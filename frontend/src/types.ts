@@ -9,6 +9,8 @@ export interface OpenDocument {
 }
 
 export interface DocumentTab extends OpenDocument {
+  key: string
+  locked: boolean
   savedContent: string
   mode: ViewMode
   generation: number

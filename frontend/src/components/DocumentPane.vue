@@ -5,11 +5,13 @@ import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { markdown } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { tags } from '@lezer/highlight'
 import { AppService } from '../../bindings/markdownlite'
 import { renderMarkdown } from '../markdown'
 import type { DocumentTab } from '../types'
 
-const props = defineProps<{ document: DocumentTab; locked: boolean; active: boolean }>()
+const props = defineProps<{ document: DocumentTab; locked: boolean; active: boolean; dark: boolean }>()
 const emit = defineEmits<{ change: [id: string, content: string]; error: [message: string] }>()
 const editorHost = ref<HTMLElement>()
 const preview = ref<HTMLElement>()
@@ -19,6 +21,7 @@ const resizing = ref(false)
 const renderedContent = ref(props.document.content)
 const rendered = computed(() => renderMarkdown(renderedContent.value, props.document.id))
 const lockConfiguration = new Compartment()
+const themeConfiguration = new Compartment()
 let editor: EditorView | undefined
 let renderTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -28,6 +31,25 @@ function lockExtensions() {
     EditorView.editable.of(!props.locked),
     EditorView.contentAttributes.of({ 'aria-readonly': String(props.locked) }),
   ]
+}
+
+function createEditorTheme() {
+  const fontSize = 14
+  const lineHeight = 1.9
+  return EditorView.theme({
+    '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--text)', fontSize: `${fontSize}px`, '--editor-line-height': `${fontSize * lineHeight}px` },
+    '&.cm-focused': { outline: 'none' },
+    '.cm-scroller': { fontFamily: '"Cascadia Code", "Consolas", "Microsoft YaHei UI", monospace', lineHeight: String(lineHeight), overflow: 'auto' },
+    '.cm-content': { padding: '30px 24px 80px 12px', caretColor: 'var(--accent-text)' },
+    '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent-text)' },
+    '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: 'var(--editor-gutter)', padding: '0 4px 0 12px' },
+    '.cm-activeLineGutter, .cm-activeLine': { backgroundColor: 'var(--editor-active-line)' },
+    '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--selection)' },
+    '.cm-matchingBracket': { backgroundColor: 'var(--selection)' },
+    '.cm-panels, .cm-tooltip': { backgroundColor: 'var(--surface-raised)', color: 'var(--text)', borderColor: 'var(--border)' },
+    '.cm-searchMatch': { backgroundColor: 'var(--selection)', outline: '1px solid var(--accent)' },
+    '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'var(--surface-selected)' },
+  }, { dark: props.dark })
 }
 
 function createState() {
@@ -41,15 +63,22 @@ function createState() {
       EditorState.lineSeparator.of(lineEnding),
       lockConfiguration.of(lockExtensions()),
       EditorView.contentAttributes.of({ 'aria-label': 'Markdown 原文', tabindex: '0', spellcheck: 'false' }),
-      EditorView.theme({
-        '&': { height: '100%', backgroundColor: 'transparent', fontSize: '14px' },
-        '&.cm-focused': { outline: 'none' },
-        '.cm-scroller': { fontFamily: '"Cascadia Code", "Consolas", "Microsoft YaHei UI", monospace', lineHeight: '1.9', overflow: 'auto' },
-        '.cm-content': { padding: '30px 24px 80px 12px', caretColor: '#3d7869' },
-        '.cm-gutters': { backgroundColor: 'transparent', border: 'none', color: '#a5aab0', padding: '0 4px 0 12px' },
-        '.cm-activeLineGutter, .cm-activeLine': { backgroundColor: '#edf1ef' },
-        '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: '#dcebe5' },
-      }),
+      themeConfiguration.of(createEditorTheme()),
+      syntaxHighlighting(HighlightStyle.define([
+        { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: 'var(--syntax-keyword)' },
+        { tag: [tags.name, tags.propertyName], color: 'var(--text)' },
+        { tag: [tags.typeName, tags.className, tags.function(tags.variableName)], color: 'var(--syntax-entity)' },
+        { tag: [tags.number, tags.bool, tags.null, tags.atom, tags.attributeName], color: 'var(--syntax-constant)' },
+        { tag: [tags.string, tags.regexp, tags.url], color: 'var(--syntax-string)' },
+        { tag: [tags.comment, tags.meta], color: 'var(--syntax-comment)' },
+        { tag: [tags.tagName, tags.heading], color: 'var(--syntax-tag)' },
+        { tag: tags.heading, fontWeight: '600' },
+        { tag: tags.link, color: 'var(--link)', textDecoration: 'underline' },
+        { tag: tags.strong, fontWeight: 'bold' },
+        { tag: tags.emphasis, fontStyle: 'italic' },
+        { tag: tags.strikethrough, textDecoration: 'line-through' },
+        { tag: tags.invalid, color: 'var(--error-text)' },
+      ])),
       EditorView.updateListener.of(update => {
         if (update.docChanged) emit('change', props.document.id, update.state.sliceDoc())
       }),
@@ -59,6 +88,10 @@ function createState() {
 
 watch(() => props.locked, () => {
   editor?.dispatch({ effects: lockConfiguration.reconfigure(lockExtensions()) })
+})
+
+watch(() => props.dark, () => {
+  editor?.dispatch({ effects: themeConfiguration.reconfigure(createEditorTheme()) })
 })
 
 watch(() => props.document.content, content => {
@@ -116,7 +149,10 @@ async function openLink(event: MouseEvent) {
   }
 }
 
-onMounted(() => { editor = new EditorView({ state: createState(), parent: editorHost.value }) })
+onMounted(() => {
+  editor = new EditorView({ state: createState(), parent: editorHost.value })
+  if (props.active && !props.document.path) editor.focus()
+})
 onBeforeUnmount(() => { clearTimeout(renderTimer); editor?.destroy() })
 </script>
 

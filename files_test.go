@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,6 +9,126 @@ import (
 	"path/filepath"
 	"testing"
 )
+
+func TestSaveNewCreatesDocumentAndKeepsCanonicalIdentity(t *testing.T) {
+	dir := t.TempDir()
+	target, err := prepareSaveTarget(filepath.Join(dir, "新建文档"))
+	if err != nil || target.Name != "新建文档.md" || target.Revision != "" {
+		t.Fatalf("unexpected target: %+v, %v", target, err)
+	}
+	if _, err := os.Stat(target.Path); !os.IsNotExist(err) {
+		t.Fatal("selecting a save target created a file")
+	}
+	store := newFileStore()
+	content := "# 新建文档\r\n\r\n  保留空格  \r\n"
+	result, err := store.saveNew(target.Path, content, target.Revision, false)
+	if err != nil || result.Conflict || result.Document == nil {
+		t.Fatalf("new save failed: %+v, %v", result, err)
+	}
+	doc := result.Document
+	if doc.ID != target.ID || doc.Content != content || doc.Revision != digest([]byte(content)) {
+		t.Fatalf("invalid saved document: %+v", doc)
+	}
+	opened := store.open([]string{filepath.Join(dir, ".", target.Name)}).Documents[0]
+	if opened.ID != doc.ID || opened.Content != content {
+		t.Fatal("saved document changed identity or source bytes")
+	}
+	if _, err := store.save(doc.ID, "updated", doc.Revision, false); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := store.reload(doc.ID)
+	if err != nil || reloaded.Content != "updated" {
+		t.Fatalf("new document could not be edited after saving: %+v, %v", reloaded, err)
+	}
+}
+
+func TestSaveNewDetectsChangesAndSupportsExplicitOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "existing.md")
+	if err := os.WriteFile(path, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	target, err := prepareSaveTarget(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("external"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	store := newFileStore()
+	result, err := store.saveNew(path, "draft", target.Revision, false)
+	if err != nil || !result.Conflict || result.Document != nil {
+		t.Fatalf("external change was not detected: %+v, %v", result, err)
+	}
+	if len(store.paths) != 0 {
+		t.Fatal("a failed save registered a document")
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != "external" {
+		t.Fatal("a conflicting save changed the file")
+	}
+	result, err = store.saveNew(path, "draft", target.Revision, true)
+	if err != nil || result.Conflict || result.Document == nil {
+		t.Fatalf("explicit overwrite failed: %+v, %v", result, err)
+	}
+	empty, err := store.saveNew(filepath.Join(filepath.Dir(path), "empty.md"), "", "", false)
+	if err != nil || empty.Document == nil || empty.Document.Content != "" {
+		t.Fatalf("saving a blank document failed: %+v, %v", empty, err)
+	}
+}
+
+func TestConcurrentNewSavesKeepTheWinningContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.md")
+	store := newFileStore()
+	results := make(chan SaveNewResult, 2)
+	failures := make(chan error, 2)
+	for _, content := range []string{"first", "second"} {
+		go func() {
+			result, err := store.saveNew(path, content, "", false)
+			results <- result
+			failures <- err
+		}()
+	}
+	winners, conflicts := 0, 0
+	var winner *Document
+	for range 2 {
+		result := <-results
+		if err := <-failures; err != nil {
+			t.Fatal(err)
+		}
+		if result.Conflict {
+			conflicts++
+		} else if result.Document != nil {
+			winners++
+			winner = result.Document
+		}
+	}
+	if winners != 1 || conflicts != 1 {
+		t.Fatalf("unexpected concurrent results: %d winners, %d conflicts", winners, conflicts)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != winner.Content {
+		t.Fatalf("winning save was replaced: %q, %v", data, err)
+	}
+}
+
+func TestSaveNewRejectsInvalidTargetsAndDialogCancellation(t *testing.T) {
+	store := newFileStore()
+	dir := t.TempDir()
+	for _, path := range []string{"", filepath.Join(dir, "note.txt"), filepath.Join(dir, "missing", "note.md")} {
+		if _, err := store.saveNew(path, "draft", "", false); err == nil {
+			t.Fatalf("invalid target was accepted: %s", path)
+		}
+	}
+	if _, err := store.saveNew(filepath.Join(dir, "bad.md"), "\x00", "", false); err == nil {
+		t.Fatal("invalid text was saved")
+	}
+	if len(store.paths) != 0 {
+		t.Fatal("failed saves left registered paths")
+	}
+	if !isDialogCancelled(errors.New("cancelled by user")) || isDialogCancelled(nil) || isDialogCancelled(errors.New("access denied")) {
+		t.Fatal("dialog cancellation handling hid an unrelated error")
+	}
+}
 
 func TestOpenAndSavePreservesSourceBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "中文 Markdown.md")

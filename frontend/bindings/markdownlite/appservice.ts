@@ -21,12 +21,20 @@ export function OpenFiles(paths: string[] | null): $CancellablePromise<$models.O
     return $Call.ByID(2099029349, paths);
 }
 
+export function OpenFolder(id: string): $CancellablePromise<void> {
+    return $Call.ByID(840210810, id);
+}
+
 export function OpenLink(address: string): $CancellablePromise<void> {
     return $Call.ByID(2816193738, address);
 }
 
 export function PickFiles(): $CancellablePromise<$models.OpenResult> {
     return $Call.ByID(1376910418);
+}
+
+export function PickSaveTarget(name: string): $CancellablePromise<$models.Document | null> {
+    return $Call.ByID(3315592295, name);
 }
 
 export function Ready(): $CancellablePromise<$models.OpenResult> {
@@ -37,6 +45,18 @@ export function Reload(id: string): $CancellablePromise<$models.Document> {
     return $Call.ByID(1799551279, id);
 }
 
+export function Rename(id: string, name: string, currentName: string, openedIDs: string[] | null): $CancellablePromise<$models.RenameResult> {
+    return $Call.ByID(2637606580, id, name, currentName, openedIDs);
+}
+
 export function Save(id: string, content: string, revision: string, force: boolean): $CancellablePromise<$models.SaveResult> {
     return $Call.ByID(575716055, id, content, revision, force);
+}
+
+export function SaveNew(path: string, content: string, revision: string, force: boolean): $CancellablePromise<$models.SaveNewResult> {
+    return $Call.ByID(944654999, path, content, revision, force);
+}
+
+export function SetDarkMode(enabled: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2030637757, enabled);
 }

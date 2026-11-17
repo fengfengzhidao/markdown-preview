@@ -9,5 +9,7 @@ export {
 export type {
     Document,
     OpenResult,
+    RenameResult,
+    SaveNewResult,
     SaveResult
 } from "./models.js";
