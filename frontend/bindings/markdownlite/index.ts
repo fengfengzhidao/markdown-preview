@@ -9,6 +9,8 @@ export {
 export type {
     Document,
     OpenResult,
+    RecentFile,
+    RecentFileList,
     RenameResult,
     SaveNewResult,
     SaveResult

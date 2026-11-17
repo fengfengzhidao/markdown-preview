@@ -17,6 +17,10 @@ export function Copy(content: string): $CancellablePromise<void> {
     return $Call.ByID(958228695, content);
 }
 
+export function ForgetRecentFile(id: string): $CancellablePromise<$models.RecentFileList> {
+    return $Call.ByID(1027383678, id);
+}
+
 export function OpenFiles(paths: string[] | null): $CancellablePromise<$models.OpenResult> {
     return $Call.ByID(2099029349, paths);
 }
@@ -41,6 +45,10 @@ export function Ready(): $CancellablePromise<$models.OpenResult> {
     return $Call.ByID(908781073);
 }
 
+export function RecentFiles(): $CancellablePromise<$models.RecentFileList> {
+    return $Call.ByID(1267064764);
+}
+
 export function Reload(id: string): $CancellablePromise<$models.Document> {
     return $Call.ByID(1799551279, id);
 }
@@ -59,4 +67,8 @@ export function SaveNew(path: string, content: string, revision: string, force: 
 
 export function SetDarkMode(enabled: boolean): $CancellablePromise<void> {
     return $Call.ByID(2030637757, enabled);
+}
+
+export function TakeLaunchFiles(): $CancellablePromise<$models.OpenResult> {
+    return $Call.ByID(1597180589);
 }

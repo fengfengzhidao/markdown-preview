@@ -16,7 +16,7 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
-	service := &AppService{files: newFileStore()}
+	service := &AppService{files: newFileStore(), recent: &recentFileStore{}}
 	titleBarColour := uint32(0x00fbfcfc)
 	titleTextColour := uint32(0x006e776a)
 	borderColour := uint32(0x00e8eae8)
@@ -30,6 +30,10 @@ func main() {
 		Icon:        appIcon,
 		Description: "简约的本地 Markdown 阅读器",
 		Services:    []application.Service{application.NewService(service)},
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID:               "com.fengfengzhidao.markdownlite",
+			OnSecondInstanceLaunch: service.handleSecondInstance,
+		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 			Middleware: func(next http.Handler) http.Handler {

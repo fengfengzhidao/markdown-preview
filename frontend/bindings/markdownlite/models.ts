@@ -12,17 +12,34 @@ export interface Document {
 export interface OpenResult {
     "documents": Document[] | null;
     "errors": string[] | null;
+    "recentFiles": RecentFileList | null;
+    "recentError": string;
+}
+
+export interface RecentFile {
+    "id": string;
+    "path": string;
+    "name": string;
+}
+
+export interface RecentFileList {
+    "revision": number;
+    "files": RecentFile[] | null;
 }
 
 export interface RenameResult {
     "id": string;
     "path": string;
     "name": string;
+    "recentFiles": RecentFileList | null;
+    "recentError": string;
 }
 
 export interface SaveNewResult {
     "document": Document | null;
     "conflict": boolean;
+    "recentFiles": RecentFileList | null;
+    "recentError": string;
 }
 
 export interface SaveResult {

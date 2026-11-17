@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Events } from '@wailsio/runtime'
 import { AppService } from '../bindings/markdownlite'
 import DocumentPane from './components/DocumentPane.vue'
-import type { DocumentTab, OpenDocument, ViewMode } from './types'
+import FileSidebar from './components/FileSidebar.vue'
+import type { DocumentTab, OpenDocument, RecentFile, RecentFileList, ViewMode } from './types'
 
 const documents = ref<DocumentTab[]>([])
 // Stable pane order preserves browser scroll positions when tabs move.
 const documentPanes = computed(() => [...documents.value].sort((first, second) => first.key.localeCompare(second.key)))
 const activeID = ref('')
+const recentFiles = ref<RecentFileList>({ revision: -1, files: [] })
+const sidebarOpen = ref(true)
+try { sidebarOpen.value = localStorage.getItem('moye.sidebar') !== 'closed' } catch { /* Use the default layout. */ }
 const darkMode = ref(document.documentElement.dataset.theme === 'dark')
 const changingTheme = ref(true)
 const opening = ref(false)
@@ -23,7 +27,7 @@ const tabStrip = ref<HTMLElement>()
 const tabOverflow = ref<HTMLElement>()
 const hasTabOverflow = ref(false)
 const tabMenuOpen = ref(false)
-const fileContext = ref<{ document: DocumentTab; x: number; y: number }>()
+const fileContext = ref<{ document?: DocumentTab; x: number; y: number }>()
 const fileContextMenu = ref<HTMLElement>()
 const renameDialog = ref<HTMLDialogElement>()
 const renameInput = ref<HTMLInputElement>()
@@ -47,6 +51,11 @@ let tabOverflowFrame: number | undefined
 let tabResizeObserver: ResizeObserver | undefined
 let suppressTabClick = false
 let newDocumentCount = 0
+let launchReady = false
+let drainingLaunches = false
+let launchRequested = false
+let pendingLaunchResult: { documents: OpenDocument[] | null; errors: string[] | null; recentFiles?: RecentFileList | null; recentError?: string } | undefined
+const launchBlocked = computed(() => opening.value || closing.value || !!question.value || !!renamePrompt.value)
 const unsubscribe: Array<() => void> = []
 
 function isDirty(document: DocumentTab) {
@@ -73,7 +82,33 @@ function selectTab(id: string, focus = false) {
   })
 }
 
-function ingest(result: { documents: OpenDocument[] | null; errors: string[] | null }) {
+function applyRecentFiles(list?: RecentFileList | null) {
+  if (list && list.revision >= recentFiles.value.revision) recentFiles.value = list
+}
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
+  try { localStorage.setItem('moye.sidebar', sidebarOpen.value ? 'open' : 'closed') } catch { /* Apply the layout for this session. */ }
+}
+
+async function openRecentFile(file: RecentFile) {
+  if (launchBlocked.value) return
+  if (documents.value.some(document => document.id === file.id)) {
+    selectTab(file.id)
+    return
+  }
+  opening.value = true
+  try { ingest(await AppService.OpenFiles([file.path])) } catch (error) { showError(error) }
+  finally { opening.value = false }
+}
+
+async function removeRecentFile(id: string) {
+  if (launchBlocked.value) return
+  try { applyRecentFiles(await AppService.ForgetRecentFile(id)) } catch (error) { showError(error) }
+}
+
+function ingest(result: { documents: OpenDocument[] | null; errors: string[] | null; recentFiles?: RecentFileList | null; recentError?: string }) {
+  applyRecentFiles(result.recentFiles)
   for (const document of result.documents ?? []) {
     if (!documents.value.some(existing => existing.id === document.id)) {
       documents.value.push({ ...document, key: document.id, locked: true, savedContent: document.content, mode: 'split', generation: 0 })
@@ -81,6 +116,7 @@ function ingest(result: { documents: OpenDocument[] | null; errors: string[] | n
     selectTab(document.id)
   }
   if (result.errors?.length) notify(result.errors.join('\n'), true)
+  else if (result.recentError) showError(result.recentError)
 }
 
 function newDocument() {
@@ -98,6 +134,7 @@ function newDocument() {
 
 async function pickFiles() {
   if (opening.value || closing.value || question.value || renamePrompt.value) return
+  closeFileContext()
   opening.value = true
   try { ingest(await AppService.PickFiles()) } catch (error) { showError(error) }
   finally { opening.value = false }
@@ -107,6 +144,38 @@ async function openFiles(paths: string[]) {
   if (closing.value || question.value || renamePrompt.value) return
   try { ingest(await AppService.OpenFiles(paths)) } catch (error) { showError(error) }
 }
+
+async function drainLaunchFiles() {
+  if (!launchReady || drainingLaunches || launchBlocked.value) return
+  drainingLaunches = true
+  try {
+    while (!launchBlocked.value) {
+      if (pendingLaunchResult) {
+        ingest(pendingLaunchResult)
+        pendingLaunchResult = undefined
+        continue
+      }
+      launchRequested = false
+      const result = await AppService.TakeLaunchFiles()
+      if (!result.documents?.length && !result.errors?.length && !launchRequested) break
+      pendingLaunchResult = result
+    }
+  } catch (error) {
+    launchRequested = true
+    showError(error)
+  } finally {
+    drainingLaunches = false
+  }
+}
+
+function requestLaunchFiles() {
+  launchRequested = true
+  void drainLaunchFiles()
+}
+
+watch(launchBlocked, blocked => {
+  if (!blocked && (launchRequested || pendingLaunchResult)) void drainLaunchFiles()
+})
 
 function changeContent(id: string, content: string) {
   const document = documents.value.find(document => document.id === id)
@@ -151,6 +220,7 @@ async function saveNewDocument(document: DocumentTab, content: string): Promise<
     result = await AppService.SaveNew(target.path, content, target.revision, true)
   }
   if (!result.document) return false
+  applyRecentFiles(result.recentFiles)
   const saved = result.document
   const draftID = document.id
   const savedTab = documents.value.find(other => other !== document && other.id === saved.id)
@@ -169,7 +239,7 @@ async function saveNewDocument(document: DocumentTab, content: string): Promise<
     Object.assign(document, saved, { content: document.content, savedContent: content })
     if (activeID.value === draftID) selectTab(saved.id)
   }
-  notify('已保存')
+  notify(result.recentError || '已保存', !!result.recentError)
   return document.content === content
 }
 
@@ -238,6 +308,22 @@ async function closeApplication() {
     await AppService.Close()
   } catch (error) { showError(error) }
   finally { closing.value = false }
+}
+
+async function closeAllTabs() {
+  if (launchBlocked.value) return
+  if (saving.size) { notify('正在保存，请稍候'); return }
+  closeFileContext()
+  closeTabMenu()
+  finishTabDrag()
+  closing.value = true
+  try {
+    for (const document of [...documents.value]) {
+      if (!(await confirmClose(document))) return
+    }
+    documents.value = []
+    activeID.value = ''
+  } finally { closing.value = false }
 }
 
 async function copyMarkdown() {
@@ -396,12 +482,17 @@ function closeFileContext() {
   fileContext.value = undefined
 }
 
-async function openFileContext(event: MouseEvent, document: DocumentTab) {
-  if (closing.value || question.value || renamePrompt.value) return
+function openTabAreaContext(event: MouseEvent) {
+  if ((event.target as Element).closest('.tab, .tab-overflow')) return
+  void openFileContext(event)
+}
+
+async function openFileContext(event: MouseEvent, document?: DocumentTab) {
+  if (launchBlocked.value) return
   closeMenu()
   closeTabMenu()
   finishTabDrag()
-  selectTab(document.id)
+  if (document) selectTab(document.id)
   const anchor = (event.currentTarget as HTMLElement).getBoundingClientRect()
   const keyboard = event.clientX === 0 && event.clientY === 0
   fileContext.value = { document, x: keyboard ? anchor.left : event.clientX, y: keyboard ? anchor.bottom : event.clientY }
@@ -456,6 +547,7 @@ async function confirmRename() {
   try {
     const openedIDs = documents.value.filter(other => other !== document && other.path).map(other => other.id)
     const result = await AppService.Rename(document.path ? document.id : '', prompt.name, document.name, openedIDs)
+    applyRecentFiles(result.recentFiles)
     if (document.path) {
       document.id = result.id
       document.path = result.path
@@ -465,7 +557,7 @@ async function confirmRename() {
     renameDialog.value?.close()
     renamePrompt.value = undefined
     selectTab(activeID.value, true)
-    notify('已重命名')
+    notify(result.recentError || '已重命名', !!result.recentError)
   } catch (error) {
     prompt.error = error instanceof Error ? error.message : String(error)
   } finally { renaming.value = false }
@@ -585,9 +677,15 @@ onMounted(async () => {
   window.addEventListener('blur', closeFileContext)
   window.addEventListener('resize', closeFileContext)
   unsubscribe.push(Events.On('files:drop', event => { void openFiles(event.data as string[]) }))
+  unsubscribe.push(Events.On('app:open-files', requestLaunchFiles))
   unsubscribe.push(Events.On('app:close-request', () => { void closeApplication() }))
   void AppService.SetDarkMode(darkMode.value).catch(showError).finally(() => { changingTheme.value = false })
+  try { applyRecentFiles(await AppService.RecentFiles()) } catch (error) { showError(error) }
   try { ingest(await AppService.Ready()) } catch (error) { showError(error) }
+  finally {
+    launchReady = true
+    requestLaunchFiles()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -611,9 +709,8 @@ onBeforeUnmount(() => {
 <template>
   <main ref="appRoot" class="app" data-file-drop-target @dragleave="onFileDragLeave" @drop.capture="clearFileDrop">
     <header class="toolbar">
-      <button class="open-button new-button" title="新建 Markdown 文件 · Ctrl+N" :disabled="opening || closing" @click="newDocument"><span aria-hidden="true">＋</span><span>新建</span></button>
-      <button class="open-button" title="打开 Markdown 文件 · Ctrl+O" :disabled="opening || closing" @click="pickFiles"><span class="folder-icon" aria-hidden="true" /><span>打开</span></button>
-      <div ref="tabNavigation" class="tab-navigation">
+      <button class="sidebar-toggle" :class="{ chosen: sidebarOpen }" :aria-label="sidebarOpen ? '收起文件列表' : '展开文件列表'" :title="sidebarOpen ? '收起文件列表' : '展开文件列表'" :aria-expanded="sidebarOpen" aria-controls="file-sidebar" @click="toggleSidebar"><span class="sidebar-toggle-icon" aria-hidden="true" /></button>
+      <div ref="tabNavigation" class="tab-navigation" @contextmenu.prevent="openTabAreaContext">
         <div ref="tabs" class="tabs" :class="{ 'dragging-tabs': tabDrag?.started }" role="tablist" aria-label="已打开的文件" @wheel="scrollTabs">
           <div ref="tabStrip" class="tab-strip">
             <div v-for="document in documents" :key="document.key" class="tab" :class="{ selected: activeID === document.id, 'tab-dragging': tabDrag?.started && tabDrag.id === document.id }" :data-tab-id="document.id" :title="document.path || '尚未保存'" @contextmenu.prevent.stop="openFileContext($event, document)" @pointerdown.middle.prevent @auxclick.middle.prevent="closeTab(document)">
@@ -674,57 +771,62 @@ onBeforeUnmount(() => {
       <div class="tab-drag-preview" :style="{ left: `${tabDrag.x + 12}px`, top: `${tabDrag.y + 14}px` }">{{ draggedDocument?.name }}</div>
     </template>
 
-    <div v-if="!documents.length" class="empty-state">
-      <section class="welcome" aria-labelledby="welcome-title">
-        <header class="welcome-header">
-          <h1 id="welcome-title">墨页</h1>
-          <p class="welcome-lead">本地 Markdown 阅读与编辑工具</p>
-          <p class="welcome-description">阅读项目说明、技术文档和本地笔记，也可以新建文档、编辑文章。</p>
-          <div class="welcome-actions">
-            <button class="empty-open" :disabled="opening || closing" @click="pickFiles">打开文件 <kbd>Ctrl+O</kbd></button>
-            <button class="empty-open welcome-new" :disabled="opening || closing" @click="newDocument">新建文档 <kbd>Ctrl+N</kbd></button>
-          </div>
-          <p class="welcome-drop-hint">也可以把文件拖入窗口，支持 UTF-8 编码的 .md、.markdown 文件，可一次打开多篇。</p>
-        </header>
+    <div class="workspace">
+      <FileSidebar v-if="sidebarOpen" :files="recentFiles.files ?? []" :active-id="activeID" :busy="launchBlocked" @create="newDocument" @pick="pickFiles" @open="openRecentFile" @remove="removeRecentFile" />
+      <div class="content-area">
+        <div v-if="!documents.length" class="empty-state">
+          <section class="welcome" aria-labelledby="welcome-title">
+            <header class="welcome-header">
+              <h1 id="welcome-title">墨页</h1>
+              <p class="welcome-lead">本地 Markdown 阅读与编辑工具</p>
+              <p class="welcome-description">阅读项目说明、技术文档和本地笔记，也可以新建文档、编辑文章。</p>
+              <div class="welcome-actions">
+                <button class="empty-open" :disabled="opening || closing" @click="pickFiles">打开文件 <kbd>Ctrl+O</kbd></button>
+                <button class="empty-open welcome-new" :disabled="opening || closing" @click="newDocument">新建文档 <kbd>Ctrl+N</kbd></button>
+              </div>
+              <p class="welcome-drop-hint">也可以把文件拖入窗口，支持 UTF-8 编码的 .md、.markdown 文件，可一次打开多篇。</p>
+            </header>
 
-        <section class="welcome-guides" aria-label="功能与使用方式">
-          <div class="welcome-guide">
-            <h2>阅读与预览</h2>
-            <p>在“原文 / 分栏 / 预览”之间切换。支持代码高亮、表格、任务列表和本地图片。</p>
-          </div>
-          <div class="welcome-guide">
-            <h2>写作与保存</h2>
-            <p>新建文档可直接输入。打开已有文件后，在右上角“…”中关闭“编辑锁定”即可修改。新文档首次保存时选择位置。</p>
-          </div>
-          <div class="welcome-guide">
-            <h2>管理多个文件</h2>
-            <p>点击标签切换文章，拖动标签调整顺序。标签较多时使用“更多文章”。右键标签可打开文件夹、复制路径或重命名。</p>
-          </div>
-        </section>
+            <section class="welcome-guides" aria-label="功能与使用方式">
+              <div class="welcome-guide">
+                <h2>阅读与预览</h2>
+                <p>在“原文 / 分栏 / 预览”之间切换。支持代码高亮、表格、任务列表和本地图片。</p>
+              </div>
+              <div class="welcome-guide">
+                <h2>写作与保存</h2>
+                <p>新建文档可直接输入。打开已有文件后，在右上角“…”中关闭“编辑锁定”即可修改。新文档首次保存时选择位置。</p>
+              </div>
+              <div class="welcome-guide">
+                <h2>管理多个文件</h2>
+                <p>点击标签切换文章，拖动标签调整顺序。标签较多时使用“更多文章”。右键标签可打开文件夹、复制路径或重命名。</p>
+              </div>
+            </section>
 
-        <section class="welcome-help" aria-labelledby="welcome-shortcuts-title">
-          <h2 id="welcome-shortcuts-title">常用快捷键</h2>
-          <dl class="welcome-shortcuts">
-            <div><dt>保存文档</dt><dd><kbd>Ctrl+S</kbd></dd></div>
-            <div><dt>切换编辑锁定</dt><dd><kbd>Ctrl+Shift+L</kbd></dd></div>
-            <div><dt>复制完整 Markdown</dt><dd><kbd>Ctrl+Shift+C</kbd></dd></div>
-            <div><dt>切换标签</dt><dd><kbd>Ctrl+Tab</kbd></dd></div>
-          </dl>
-          <p class="welcome-menu-hint">右上角“…”还可以复制完整 Markdown、切换黑夜模式。</p>
-        </section>
-      </section>
+            <section class="welcome-help" aria-labelledby="welcome-shortcuts-title">
+              <h2 id="welcome-shortcuts-title">常用快捷键</h2>
+              <dl class="welcome-shortcuts">
+                <div><dt>保存文档</dt><dd><kbd>Ctrl+S</kbd></dd></div>
+                <div><dt>切换编辑锁定</dt><dd><kbd>Ctrl+Shift+L</kbd></dd></div>
+                <div><dt>复制完整 Markdown</dt><dd><kbd>Ctrl+Shift+C</kbd></dd></div>
+                <div><dt>切换标签</dt><dd><kbd>Ctrl+Tab</kbd></dd></div>
+              </dl>
+              <p class="welcome-menu-hint">右上角“…”还可以复制完整 Markdown、切换黑夜模式。</p>
+            </section>
+          </section>
+        </div>
+        <DocumentPane
+          v-for="document in documentPanes"
+          v-show="document.id === activeID"
+          :key="document.key"
+          :document="document"
+          :locked="document.locked || closing"
+          :dark="darkMode"
+          :active="document.id === activeID"
+          @change="changeContent"
+          @error="showError"
+        />
+      </div>
     </div>
-    <DocumentPane
-      v-for="document in documentPanes"
-      v-show="document.id === activeID"
-      :key="document.key"
-      :document="document"
-      :locked="document.locked || closing"
-      :dark="darkMode"
-      :active="document.id === activeID"
-      @change="changeContent"
-      @error="showError"
-    />
 
     <div v-if="!question && !closing" class="file-drop-overlay" role="status" aria-live="polite">
       <div class="file-drop-content">
@@ -739,10 +841,17 @@ onBeforeUnmount(() => {
       <button v-if="notificationError" aria-label="关闭提示" @click="notification = ''">×</button>
     </div>
 
-    <div v-if="fileContext" ref="fileContextMenu" class="action-menu tab-context-menu" role="menu" aria-label="文件操作" :style="{ left: `${fileContext.x}px`, top: `${fileContext.y}px` }" @keydown="onMenuKeydown">
-      <button role="menuitem" :disabled="!fileContext.document.path" @click="openFileFolder(fileContext.document)">打开当前文件夹</button>
-      <button role="menuitem" :disabled="!fileContext.document.path" @click="copyFilePath(fileContext.document)">复制文件路径</button>
-      <button role="menuitem" :disabled="saving.size > 0" @click="beginRename(fileContext.document)">重命名</button>
+    <div v-if="fileContext" ref="fileContextMenu" class="action-menu tab-context-menu" role="menu" :aria-label="fileContext.document ? '文件操作' : '标签栏操作'" :style="{ left: `${fileContext.x}px`, top: `${fileContext.y}px` }" @keydown="onMenuKeydown">
+      <template v-if="fileContext.document">
+        <button role="menuitem" :disabled="!fileContext.document.path" @click="openFileFolder(fileContext.document)">打开当前文件夹</button>
+        <button role="menuitem" :disabled="!fileContext.document.path" @click="copyFilePath(fileContext.document)">复制文件路径</button>
+        <button role="menuitem" :disabled="saving.size > 0" @click="beginRename(fileContext.document)">重命名</button>
+      </template>
+      <template v-else>
+        <button role="menuitem" :disabled="!documents.length || saving.size > 0 || launchBlocked" @click="closeAllTabs">清空所有</button>
+        <button role="menuitem" :disabled="launchBlocked" @click="newDocument">新建文档</button>
+        <button role="menuitem" :disabled="launchBlocked" @click="pickFiles">打开文档</button>
+      </template>
     </div>
 
     <dialog ref="renameDialog" class="confirm-dialog rename-dialog" aria-labelledby="rename-title" @cancel.prevent="cancelRename">

@@ -27,8 +27,10 @@ type Document struct {
 }
 
 type OpenResult struct {
-	Documents []Document `json:"documents"`
-	Errors    []string   `json:"errors"`
+	Documents   []Document      `json:"documents"`
+	Errors      []string        `json:"errors"`
+	RecentFiles *RecentFileList `json:"recentFiles"`
+	RecentError string          `json:"recentError"`
 }
 
 type SaveResult struct {
@@ -37,14 +39,18 @@ type SaveResult struct {
 }
 
 type SaveNewResult struct {
-	Document *Document `json:"document"`
-	Conflict bool      `json:"conflict"`
+	Document    *Document       `json:"document"`
+	Conflict    bool            `json:"conflict"`
+	RecentFiles *RecentFileList `json:"recentFiles"`
+	RecentError string          `json:"recentError"`
 }
 
 type RenameResult struct {
-	ID   string `json:"id"`
-	Path string `json:"path"`
-	Name string `json:"name"`
+	ID          string          `json:"id"`
+	Path        string          `json:"path"`
+	Name        string          `json:"name"`
+	RecentFiles *RecentFileList `json:"recentFiles"`
+	RecentError string          `json:"recentError"`
 }
 
 type fileStore struct {

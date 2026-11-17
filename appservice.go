@@ -5,22 +5,26 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 type AppService struct {
-	app        *application.App
-	window     *application.WebviewWindow
-	files      *fileStore
-	ready      atomic.Bool
-	allowClose atomic.Bool
+	app                *application.App
+	window             *application.WebviewWindow
+	files              *fileStore
+	recent             *recentFileStore
+	ready              atomic.Bool
+	allowClose         atomic.Bool
+	launchMu           sync.Mutex
+	pendingLaunchFiles []string
 }
 
 func (s *AppService) Ready() OpenResult {
 	s.ready.Store(true)
-	return s.files.open(os.Args[1:])
+	return s.openDocuments(os.Args[1:])
 }
 
 func (s *AppService) PickFiles() (OpenResult, error) {
@@ -35,7 +39,7 @@ func (s *AppService) PickFiles() (OpenResult, error) {
 		}
 		return OpenResult{}, err
 	}
-	return s.files.open(paths), nil
+	return s.openDocuments(paths), nil
 }
 
 func isDialogCancelled(err error) bool {
@@ -65,11 +69,41 @@ func (s *AppService) PickSaveTarget(name string) (*Document, error) {
 }
 
 func (s *AppService) SaveNew(path, content, revision string, force bool) (SaveNewResult, error) {
-	return s.files.saveNew(path, content, revision, force)
+	result, err := s.files.saveNew(path, content, revision, force)
+	if err == nil && result.Document != nil && s.recent != nil {
+		list, historyErr := s.recent.remember([]Document{*result.Document}, "")
+		if historyErr != nil {
+			result.RecentError = "文件已保存，" + historyErr.Error()
+		} else {
+			result.RecentFiles = &list
+		}
+	}
+	return result, err
 }
 
 func (s *AppService) OpenFiles(paths []string) OpenResult {
-	return s.files.open(paths)
+	return s.openDocuments(paths)
+}
+
+func (s *AppService) openDocuments(paths []string) OpenResult {
+	result := s.files.open(paths)
+	if s.recent != nil {
+		list, err := s.recent.remember(result.Documents, "")
+		if err != nil {
+			result.RecentError = err.Error()
+		} else {
+			result.RecentFiles = &list
+		}
+	}
+	return result
+}
+
+func (s *AppService) RecentFiles() (RecentFileList, error) {
+	return s.recent.list()
+}
+
+func (s *AppService) ForgetRecentFile(id string) (RecentFileList, error) {
+	return s.recent.remove(id)
 }
 
 func (s *AppService) Reload(id string) (Document, error) {
@@ -93,7 +127,17 @@ func (s *AppService) Rename(id, name, currentName string, openedIDs []string) (R
 		name, err := normalizeDocumentName(name, filepath.Ext(currentName))
 		return RenameResult{Name: name}, err
 	}
-	return s.files.rename(id, name, openedIDs...)
+	result, err := s.files.rename(id, name, openedIDs...)
+	if err == nil && s.recent != nil {
+		document := Document{ID: result.ID, Path: result.Path, Name: result.Name}
+		list, historyErr := s.recent.remember([]Document{document}, id)
+		if historyErr != nil {
+			result.RecentError = "文件已重命名，" + historyErr.Error()
+		} else {
+			result.RecentFiles = &list
+		}
+	}
+	return result, err
 }
 
 func (s *AppService) Copy(content string) error {
