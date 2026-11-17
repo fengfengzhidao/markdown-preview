@@ -61,6 +61,10 @@ export function Save(id: string, content: string, revision: string, force: boole
     return $Call.ByID(575716055, id, content, revision, force);
 }
 
+export function SaveImage(id: string, dataURL: string): $CancellablePromise<string> {
+    return $Call.ByID(3019597804, id, dataURL);
+}
+
 export function SaveNew(path: string, content: string, revision: string, force: boolean): $CancellablePromise<$models.SaveNewResult> {
     return $Call.ByID(944654999, path, content, revision, force);
 }

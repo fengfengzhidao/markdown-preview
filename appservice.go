@@ -147,6 +147,10 @@ func (s *AppService) Copy(content string) error {
 	return nil
 }
 
+func (s *AppService) SaveImage(id, dataURL string) (string, error) {
+	return s.files.saveImage(id, dataURL)
+}
+
 func (s *AppService) OpenLink(address string) error {
 	parsed, err := url.Parse(address)
 	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "mailto") {

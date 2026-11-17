@@ -197,7 +197,55 @@ button { transition: background-color .15s, color .15s; }
 .empty-open, .dialog-actions .primary { border-radius: 6px; background: var(--button-bg); color: var(--button-text); font-size: 12px; padding: 9px 14px; white-space: nowrap; }
 .empty-open:hover, .dialog-actions .primary:hover { background: var(--button-hover); }
 .save-button { font-size: 12px; color: var(--accent-text); padding: 8px 0; }
-.document-pane { flex: 1; min-height: 0; display: flex; position: relative; }
+.document-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.document-tools { display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 4px 14px; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; background: var(--surface); }
+.document-tools button, .preview-search button { padding: 5px 9px; border-radius: 4px; font-size: 12px; color: var(--text-muted); }
+.document-tools button:hover:not(:disabled), .preview-search button:hover:not(:disabled) { background: var(--surface-hover); color: var(--accent-text); }
+.document-tools .chosen, .preview-search .chosen { background: var(--surface-selected); color: var(--accent-text); }
+.image-paste-status { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+.document-layout, .document-content { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.document-content { position: relative; }
+.outline-panel { display: flex; flex-direction: column; width: 192px; flex-shrink: 0; min-height: 0; border-left: 1px solid var(--border-subtle); background: var(--surface); }
+.outline-panel header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 8px 16px; font-size: 12px; color: var(--text-muted); }
+.outline-panel header button { width: 24px; height: 24px; border-radius: 4px; font-size: 18px; }
+.outline-panel header button:hover { background: var(--surface-hover); }
+.outline-panel nav { flex: 1; min-height: 0; overflow: auto; padding: 0 8px 24px 0; scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+.outline-row { display: flex; align-items: flex-start; min-width: 0; }
+.outline-fold, .outline-fold-space { display: block; width: 18px; min-height: 30px; flex-shrink: 0; padding: 3px 0; color: var(--text-muted); }
+.outline-link { flex: 1; min-width: 0; padding: 6px 7px; border-radius: 4px; text-align: left; color: var(--text-muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.outline-link:hover { background: var(--surface-hover); color: var(--text); }
+.outline-link.current { background: var(--surface-selected); color: var(--accent-text); }
+.outline-empty { margin: 12px 16px; font-size: 12px; line-height: 1.9; color: var(--text-faint); }
+.preview-search { display: flex; align-items: center; gap: 5px; padding: 7px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--surface); flex-shrink: 0; }
+.preview-search input { flex: 1; min-width: 60px; max-width: 360px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--background); font: inherit; font-size: 13px; }
+.preview-search input:focus { outline: 1px solid var(--accent); }
+.search-count { min-width: 64px; text-align: center; font-size: 12px; color: var(--text-muted); }
+.markdown-body mark.preview-match { background: #f4dc8c; color: #473911; border-radius: 2px; }
+.markdown-body mark.preview-match.current { background: #e8ad47; color: #2c200b; outline: 1px solid #9d6b18; }
+:root[data-theme="dark"] .markdown-body mark.preview-match { background: #65551e; color: #fff3c6; }
+:root[data-theme="dark"] .markdown-body mark.preview-match.current { background: #b27b25; color: #fff; outline-color: #efc66c; }
+.markdown-body .code-block { position: relative; margin: 22px 0; }
+.markdown-body .code-block pre { margin: 0; padding-top: 40px; }
+.code-copy { position: absolute; right: 9px; top: 7px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text-muted); font-size: 11px; line-height: 1.7; z-index: 1; }
+.code-copy:hover { color: var(--accent-text); background: var(--surface-selected); }
+.markdown-body img { cursor: zoom-in; }
+.image-viewer { width: 94vw; height: 90vh; max-width: 1600px; max-height: 1100px; padding: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--background); color: var(--text); overflow: hidden; }
+.image-viewer[open] { display: flex; flex-direction: column; }
+.image-viewer::backdrop { background: #101a16bf; }
+.image-viewer-toolbar { display: flex; align-items: center; gap: 7px; padding: 9px 12px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.image-viewer-title { flex: 1; min-width: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 13px; }
+.image-viewer-toolbar button { min-width: 30px; height: 30px; padding: 0 8px; border-radius: 4px; font-size: 13px; }
+.image-viewer-toolbar button:hover { background: var(--surface-selected); }
+.image-zoom { min-width: 44px; text-align: center; font-size: 12px; color: var(--text-muted); }
+.image-viewer-toolbar .image-viewer-close { margin-left: 8px; font-size: 23px; }
+.image-viewport { flex: 1; min-height: 0; overflow: auto; cursor: grab; touch-action: none; overscroll-behavior: contain; background: var(--source-background); }
+.image-viewport.dragging { cursor: grabbing; }
+.image-stage { display: flex; align-items: center; justify-content: center; min-width: 100%; min-height: 100%; width: max-content; padding: 20px; }
+.image-stage img { display: block; flex-shrink: 0; max-width: none; object-fit: contain; user-select: none; }
+@media (max-width: 1050px) {
+  .outline-panel { width: 170px; }
+  .document-tools { padding-inline: 10px; }
+}
 .source-pane { height: 100%; background: var(--source-background); flex-shrink: 0; min-width: 0; overflow: hidden; }
 .preview-pane { flex: 1; min-width: 0; overflow: auto; scroll-behavior: auto; }
 .cm-scroller, .preview-pane { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }

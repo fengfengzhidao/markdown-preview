@@ -790,7 +790,7 @@ onBeforeUnmount(() => {
             <section class="welcome-guides" aria-label="功能与使用方式">
               <div class="welcome-guide">
                 <h2>阅读与预览</h2>
-                <p>在“原文 / 分栏 / 预览”之间切换。支持代码高亮、表格、任务列表和本地图片。</p>
+                <p>在“原文 / 分栏 / 预览”之间切换。支持文章大纲、同步滚动、预览搜索、图片缩放和代码块复制。</p>
               </div>
               <div class="welcome-guide">
                 <h2>写作与保存</h2>
@@ -822,6 +822,7 @@ onBeforeUnmount(() => {
           :locked="document.locked || closing"
           :dark="darkMode"
           :active="document.id === activeID"
+          :save-document="saveDocument"
           @change="changeContent"
           @error="showError"
         />
